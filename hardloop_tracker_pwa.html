@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="nl" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hardloop Tracker PWA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for bar charts and v,t graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet CSS & JS for maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-full flex flex-col overflow-hidden selection:bg-emerald-500 selection:text-white">
+
+    <!-- Top Header -->
+    <header class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700/50 px-4 py-3 flex items-center justify-between shrink-0 z-20">
+        <div class="flex items-center space-x-2">
+            <div class="bg-emerald-500 p-2 rounded-xl text-slate-900 font-bold shadow-lg shadow-emerald-500/20">
+                <i data-lucide="activity" class="w-5 h-5"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-base tracking-tight leading-none">RunTrack PWA</h1>
+                <span class="text-xs text-emerald-400 font-medium">GPS 2Hz Ultra-Accurate</span>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button id="btnToggleHistory" onclick="toggleHistoryDrawer()" class="p-2.5 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-slate-200 transition active:scale-95 flex items-center space-x-1 text-xs font-semibold">
+                <i data-lucide="history" class="w-4 h-4"></i>
+                <span class="hidden sm:inline">Runs</span>
+            </button>
+            <button onclick="openInfoModal()" class="p-2.5 rounded-xl bg-slate-700/60 hover:bg-slate-700 text-slate-200 transition active:scale-95">
+                <i data-lucide="info" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main View Container -->
+    <main id="mainContainer" class="flex-1 relative overflow-hidden flex flex-col" ontouchstart="handleTouchStart(event)" ontouchend="handleTouchEnd(event)">
+        
+        <!-- ================= VIEW 1: ACTIVE / IDLE RUN SCREEN ================= -->
+        <div id="viewRun" class="absolute inset-0 flex flex-col overflow-y-auto p-4 space-y-4 no-scrollbar">
+            
+            <!-- GPS Signal & Status Banner -->
+            <div id="gpsBanner" class="bg-slate-800/70 border border-slate-700/60 rounded-2xl p-3 flex items-center justify-between shadow-sm">
+                <div class="flex items-center space-x-2.5">
+                    <span id="gpsDot" class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                    <span id="gpsText" class="text-xs font-medium text-slate-300">GPS zoeken... (Wacht op signaal)</span>
+                </div>
+                <span id="gpsAccuracy" class="text-xs font-mono text-slate-400">-- m</span>
+            </div>
+
+            <!-- Target Distance Card (Idle Mode) -->
+            <div id="targetCard" class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 shadow-xl space-y-3">
+                <div class="flex items-center justify-between">
+                    <label for="targetDistanceInput" class="text-sm font-bold text-slate-200 flex items-center space-x-1.5">
+                        <i data-lucide="flag" class="w-4 h-4 text-emerald-400"></i>
+                        <span>Doelafstand (km)</span>
+                    </label>
+                    <span class="text-xs text-slate-400">Leeg = Auto (2.5 -> 5 -> 10)</span>
+                </div>
+                <div class="flex space-x-2">
+                    <input type="number" id="targetDistanceInput" step="0.1" min="0.1" placeholder="Bijv. 5.00" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-100 text-lg font-bold focus:outline-none focus:border-emerald-500 transition">
+                    <button onclick="quickSetTarget(2.5)" class="px-3 py-2 bg-slate-700/60 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition">2,5k</button>
+                    <button onclick="quickSetTarget(5.0)" class="px-3 py-2 bg-slate-700/60 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition">5k</button>
+                    <button onclick="quickSetTarget(10.0)" class="px-3 py-2 bg-slate-700/60 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition">10k</button>
+                </div>
+                <!-- ETA Preview box -->
+                <div id="etaBox" class="hidden grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/50 text-xs">
+                    <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-700/40">
+                        <span class="text-slate-400 block text-[10px]">ETA (Totale Gem.)</span>
+                        <span id="etaTotalVal" class="font-bold text-emerald-400 text-sm">--:--</span>
+                    </div>
+                    <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-700/40">
+                        <span class="text-slate-400 block text-[10px]">ETA (Huidige Km Gem.)</span>
+                        <span id="etaKmVal" class="font-bold text-emerald-400 text-sm">--:--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics Grid -->
+            <div class="grid grid-cols-2 gap-3">
+                <!-- Total Distance -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+                    <div class="flex items-center justify-between text-slate-400 mb-1">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Afstand</span>
+                        <i data-lucide="map-pin" class="w-4 h-4 text-emerald-400"></i>
+                    </div>
+                    <div>
+                        <div id="metricDistance" class="text-3xl font-extrabold tracking-tight text-white">0,00</div>
+                        <span class="text-xs text-slate-400 font-medium">kilometer</span>
+                    </div>
+                </div>
+
+                <!-- Current KM Avg Speed -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+                    <div class="flex items-center justify-between text-slate-400 mb-1">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Huidige Km</span>
+                        <i data-lucide="gauge" class="w-4 h-4 text-cyan-400"></i>
+                    </div>
+                    <div>
+                        <div id="metricKmPace" class="text-3xl font-extrabold tracking-tight text-white">0:00</div>
+                        <span class="text-xs text-slate-400 font-medium">min / km</span>
+                    </div>
+                </div>
+
+                <!-- Last 5 Sec Avg Speed -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+                    <div class="flex items-center justify-between text-slate-400 mb-1">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Laatste 5 sec</span>
+                        <i data-lucide="zap" class="w-4 h-4 text-amber-400"></i>
+                    </div>
+                    <div>
+                        <div id="metric5SecPace" class="text-3xl font-extrabold tracking-tight text-white">0:00</div>
+                        <span class="text-xs text-slate-400 font-medium">min / km</span>
+                    </div>
+                </div>
+
+                <!-- Total Average Speed -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+                    <div class="flex items-center justify-between text-slate-400 mb-1">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Totale Gem.</span>
+                        <i data-lucide="timer" class="w-4 h-4 text-indigo-400"></i>
+                    </div>
+                    <div>
+                        <div id="metricTotalPace" class="text-3xl font-extrabold tracking-tight text-white">0:00</div>
+                        <span class="text-xs text-slate-400 font-medium">min / km</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Splits Chart Card (1-minute splits) -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-slate-200 flex items-center space-x-1.5">
+                        <i data-lucide="bar-chart-2" class="w-4 h-4 text-emerald-400"></i>
+                        <span>Tempo per minuut (Splits)</span>
+                    </h3>
+                    <span class="text-[10px] text-slate-400">Lager is sneller</span>
+                </div>
+                <div class="h-40 relative w-full">
+                    <canvas id="splitsBarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Bottom Control Button Area -->
+            <div id="controlButtonArea" class="pt-2 pb-6">
+                <!-- Idle State: Start Button -->
+                <button onclick="startRun()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-lg py-4 px-6 rounded-2xl shadow-xl shadow-emerald-500/20 transition active:scale-[0.98] flex items-center justify-center space-x-2">
+                    <i data-lucide="play" class="w-6 h-6 fill-slate-950"></i>
+                    <span>START RUN</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= VIEW 2: FINISH / SAVE SUMMARY SCREEN ================= -->
+        <div id="viewSummary" class="absolute inset-0 bg-slate-900 flex flex-col p-6 overflow-y-auto hidden z-30 space-y-6">
+            <div class="text-center pt-4">
+                <div class="inline-flex p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl mb-2">
+                    <i data-lucide="check-circle-2" class="w-10 h-10"></i>
+                </div>
+                <h2 class="text-2xl font-extrabold text-white">Geweldige run!</h2>
+                <p class="text-xs text-slate-400">Vul de gegevens in om je run op te slaan.</p>
+            </div>
+
+            <!-- Summary Stats Box -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 grid grid-cols-2 gap-4 text-center">
+                <div class="p-2 border-r border-slate-700/50">
+                    <span class="text-xs text-slate-400 block">Afstand</span>
+                    <span id="sumDistance" class="text-xl font-bold text-white">0,00 km</span>
+                </div>
+                <div class="p-2">
+                    <span class="text-xs text-slate-400 block">Gem. Snelheid</span>
+                    <span id="sumPace" class="text-xl font-bold text-emerald-400">0:00</span>
+                </div>
+            </div>
+
+            <!-- Title & Donna Input Form -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 space-y-4 shadow-xl">
+                <div>
+                    <label for="runTitleInput" class="block text-xs font-semibold text-slate-300 mb-1.5">Titel van de run</label>
+                    <input type="text" id="runTitleInput" placeholder="Bijv. Avondronde door het park" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-emerald-500">
+                </div>
+                <div class="flex items-center space-x-3 pt-2">
+                    <input type="checkbox" id="donnaCheckbox" class="w-5 h-5 accent-emerald-500 rounded bg-slate-900 border-slate-700 cursor-pointer">
+                    <label for="donnaCheckbox" class="text-sm font-semibold text-slate-200 cursor-pointer flex items-center space-x-1.5">
+                        <i data-lucide="heart" class="w-4 h-4 text-rose-500"></i>
+                        <span>Met Donna gelopen</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Save Actions -->
+            <div class="space-y-3 pt-4">
+                <button onclick="saveRun()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold py-4 rounded-2xl shadow-xl transition active:scale-95 flex items-center justify-center space-x-2">
+                    <i data-lucide="save" class="w-5 h-5"></i>
+                    <span>Opslaan & Afsluiten</span>
+                </button>
+                <button onclick="discardRun()" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white font-semibold py-3 rounded-2xl transition text-xs">
+                    Verwijderen / Annuleren
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= VIEW 3: RUN DETAIL SCREEN ================= -->
+        <div id="viewDetail" class="absolute inset-0 bg-slate-900 flex flex-col hidden z-30 overflow-y-auto">
+            <!-- Header for detail -->
+            <div class="bg-slate-800/80 border-b border-slate-700 px-4 py-3 flex items-center justify-between shrink-0 sticky top-0 z-10 backdrop-blur-md">
+                <button onclick="closeDetail()" class="flex items-center space-x-1 text-slate-300 hover:text-white text-sm font-semibold p-1">
+                    <i data-lucide="arrow-left" class="w-5 h-5"></i>
+                    <span>Terug</span>
+                </button>
+                <h2 id="detailTitleHeader" class="font-bold text-sm text-white truncate max-w-[200px]">Run Details</h2>
+                <button onclick="deleteCurrentDetailRun()" class="text-rose-400 hover:text-rose-300 p-1">
+                    <i data-lucide="trash-2" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="p-4 space-y-4 flex-1">
+                <!-- Main stats grid -->
+                <div class="grid grid-cols-3 gap-2">
+                    <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 text-center">
+                        <span class="text-[10px] text-slate-400 block">Afstand</span>
+                        <span id="detailDist" class="text-lg font-extrabold text-white">--</span>
+                    </div>
+                    <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 text-center">
+                        <span class="text-[10px] text-slate-400 block">Gem. Snelheid</span>
+                        <span id="detailPace" class="text-lg font-extrabold text-emerald-400">--:--</span>
+                    </div>
+                    <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 text-center">
+                        <span class="text-[10px] text-slate-400 block">Snelste 1km</span>
+                        <span id="detailFastestKm" class="text-lg font-extrabold text-cyan-400">--:--</span>
+                    </div>
+                </div>
+
+                <!-- Donna badge if applicable -->
+                <div id="detailDonnaBadge" class="hidden bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 flex items-center space-x-2 text-rose-300 text-xs font-semibold">
+                    <i data-lucide="heart" class="w-4 h-4 fill-rose-500 text-rose-500"></i>
+                    <span>Deze run is gelopen met Donna!</span>
+                </div>
+
+                <!-- Leaflet Map Container -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3 space-y-2">
+                    <h3 class="text-xs font-bold text-slate-300 flex items-center space-x-1">
+                        <i data-lucide="map" class="w-3.5 h-3.5 text-emerald-400"></i>
+                        <span>Gelopen Route</span>
+                    </h3>
+                    <div id="detailMap" class="w-full h-48 rounded-xl bg-slate-900 border border-slate-700/50 z-0"></div>
+                </div>
+
+                <!-- 1km Splits Bar Chart -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 space-y-2">
+                    <h3 class="text-xs font-bold text-slate-300 flex items-center space-x-1">
+                        <i data-lucide="bar-chart-2" class="w-3.5 h-3.5 text-emerald-400"></i>
+                        <span>Kilometer Splits (min/km)</span>
+                    </h3>
+                    <div class="h-40 relative w-full">
+                        <canvas id="detailSplitsChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- V,T Graph (Velocity vs Time using 5 sec average speeds) -->
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4 space-y-2 pb-6">
+                    <h3 class="text-xs font-bold text-slate-300 flex items-center space-x-1">
+                        <i data-lucide="trending-up" class="w-3.5 h-3.5 text-emerald-400"></i>
+                        <span>V,T Snelheidsgrafiek (per 5 sec)</span>
+                    </h3>
+                    <div class="h-40 relative w-full">
+                        <canvas id="detailVtChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ================= HISTORY DRAWER / SLIDE-OVER ================= -->
+    <div id="historyDrawer" class="fixed inset-y-0 right-0 w-full sm:w-96 bg-slate-900 border-l border-slate-700 shadow-2xl z-40 transform translate-x-full transition-transform duration-300 flex flex-col">
+        <div class="bg-slate-800 border-b border-slate-700 p-4 flex items-center justify-between">
+            <h2 class="font-bold text-base text-white flex items-center space-x-2">
+                <i data-lucide="history" class="w-5 h-5 text-emerald-400"></i>
+                <span>Opgeslagen Runs</span>
+            </h2>
+            <button onclick="toggleHistoryDrawer()" class="p-2 rounded-xl bg-slate-700/50 hover:bg-slate-700 text-slate-300">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="historyListContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+            <!-- Dynamically populated run items -->
+        </div>
+    </div>
+
+    <!-- ================= INFO & IPHONE PWA INSTRUCTIONS MODAL ================= -->
+    <div id="infoModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button onclick="closeInfoModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white p-1">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="flex items-center space-x-3">
+                <div class="bg-emerald-500/20 text-emerald-400 p-2.5 rounded-2xl">
+                    <i data-lucide="smartphone" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-lg text-white">App op je iPhone zetten</h3>
+                    <p class="text-xs text-slate-400">Zet deze PWA op je beginscherm</p>
+                </div>
+            </div>
+            <div class="space-y-3 text-xs text-slate-300 leading-relaxed">
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 space-y-1">
+                    <span class="font-bold text-emerald-400 block">Stap 1: Open in Safari</span>
+                    <p>Zorg ervoor dat je deze webpagina opent in de **Safari** browser op je iPhone.</p>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 space-y-1">
+                    <span class="font-bold text-emerald-400 block">Stap 2: Deel-knop</span>
+                    <p>Tik onderaan in Safari op het **Deel-icoon** (het vierkantje met de pijl naar boven).</p>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 space-y-1">
+                    <span class="font-bold text-emerald-400 block">Stap 3: Zet op beginscherm</span>
+                    <p>Scroll in het menu naar beneden en tik op **'Zet op beginscherm'** ('Add to Home Screen').</p>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 space-y-1">
+                    <span class="font-bold text-emerald-400 block">Stap 4: Klaar!</span>
+                    <p>Tik op **Voeg toe**. De app staat nu als een echte app op je iPhone-startscherm met GPS-ondersteuning!</p>
+                </div>
+            </div>
+            <button onclick="closeInfoModal()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-3 rounded-xl transition">
+                Begrepen!
+            </button>
+        </div>
+    </div>
+
+    <!-- Application JavaScript -->
+    <script>
+        // --- STATE MANAGEMENT ---
+        let runState = 'idle'; // 'idle', 'active', 'paused', 'summary'
+        let watchId = null;
+        let timerInterval = null;
+        let gpsTimerInterval = null;
+
+        // Run metrics data
+        let startTime = null;
+        let pausedDuration = 0;
+        let pauseStartTime = null;
+        let totalDistance = 0; // meters
+        let routePoints = []; // array of {lat, lng, timestamp, distance}
+        let speedSamples5Sec = []; // array of {time, speed} for v,t graph
+        let activeSeconds = 0;
+
+        // Auto target distance progression
+        let autoTargetIndex = 0;
+        const autoTargets = [2500, 5000, 10000]; // in meters
+        let currentTargetDistance = 0; // in meters (0 = auto)
+        let hasPassedCurrentTarget = false;
+
+        // Current KM tracking
+        let currentKmStartDistance = 0;
+        let currentKmStartTime = null;
+
+        // 5-second window buffer for recent speed
+        let recentLocations = []; // timestamp, lat, lng, dist
+
+        // Charts instances
+        let splitsChartInstance = null;
+        let detailSplitsChartInstance = null;
+        let detailVtChartInstance = null;
+        let detailMapInstance = null;
+        let detailMapPolyline = null;
+
+        let selectedDetailRunId = null;
+
+        // Touch start X for swipe detection (swipe left to open history)
+        let touchStartX = 0;
+
+        // Initialize Lucide icons
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            initSplitsChart();
+            loadHistoryList();
+            checkGpsPermission();
+        });
+
+        // --- GPS PERMISSION & STATUS ---
+        function checkGpsPermission() {
+            if ("geolocation" in navigator) {
+                updateGpsStatus('searching', 'Zoek GPS signaal...');
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        updateGpsStatus('connected', `GPS Verbonden (${Math.round(pos.coords.accuracy)}m nauwkeurig)`, pos.coords.accuracy);
+                    },
+                    (err) => {
+                        updateGpsStatus('error', 'GPS uitgeschakeld of geen toestemming');
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                updateGpsStatus('error', 'Geolocatie wordt niet ondersteund');
+            }
+        }
+
+        function updateGpsStatus(status, text, accuracy = null) {
+            const dot = document.getElementById('gpsDot');
+            const txt = document.getElementById('gpsText');
+            const acc = document.getElementById('gpsAccuracy');
+            
+            txt.innerText = text;
+            if (accuracy !== null) {
+                acc.innerText = `${Math.round(accuracy)} m`;
+            } else {
+                acc.innerText = '-- m';
+            }
+
+            dot.className = 'w-3 h-3 rounded-full animate-pulse ';
+            if (status === 'connected') {
+                dot.className += 'bg-emerald-500';
+            } else if (status === 'searching') {
+                dot.className += 'bg-amber-500';
+            } else {
+                dot.className += 'bg-rose-500';
+            }
+        }
+
+        // --- UTILS & FORMATTING ---
+        // Format meters to km with 2 decimals: "3,12"
+        function formatDistance(meters) {
+            const km = meters / 1000;
+            return km.toFixed(2).replace('.', ',');
+        }
+
+        // Format speed in meters/sec to min/km ("m:ss")
+        function formatPace(metersPerSec) {
+            if (!metersPerSec || metersPerSec <= 0.2) return '0:00';
+            const secPerKm = 1000 / metersPerSec;
+            const minutes = Math.floor(secPerKm / 60);
+            const seconds = Math.round(secPerKm % 60);
+            return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        }
+
+        // Haversine formula for distance between two GPS coordinates in meters
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth radius in meters
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c;
+        }
+
+        // --- RUN FLOW CONTROL ---
+        function quickSetTarget(km) {
+            document.getElementById('targetDistanceInput').value = km;
+            currentTargetDistance = km * 1000;
+            updateEtaDisplay();
+        }
+
+        document.getElementById('targetDistanceInput').addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            currentTargetDistance = isNaN(val) ? 0 : val * 1000;
+            updateEtaDisplay();
+        });
+
+        function startRun() {
+            const customInput = parseFloat(document.getElementById('targetDistanceInput').value);
+            if (!isNaN(customInput) && customInput > 0) {
+                currentTargetDistance = customInput * 1000;
+            } else {
+                currentTargetDistance = autoTargets[autoTargetIndex];
+                document.getElementById('targetDistanceInput').value = (currentTargetDistance / 1000).toFixed(2).replace('.', ',');
+            }
+
+            runState = 'active';
+            startTime = Date.now();
+            pausedDuration = 0;
+            totalDistance = 0;
+            routePoints = [];
+            speedSamples5Sec = [];
+            activeSeconds = 0;
+            hasPassedCurrentTarget = false;
+            currentKmStartDistance = 0;
+            currentKmStartTime = Date.now();
+            recentLocations = [];
+
+            // UI updates
+            document.getElementById('targetCard').classList.add('opacity-70', 'pointer-events-none');
+            updateControlButtons();
+
+            // Start 2Hz GPS tracking (every 500ms)
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(
+                    onGpsUpdate,
+                    (err) => console.error("GPS error:", err),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            }
+
+            // Start timer interval (every second)
+            timerInterval = setInterval(onSecondTick, 1000);
+        }
+
+        function pauseRun() {
+            runState = 'paused';
+            pauseStartTime = Date.now();
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            if (timerInterval) clearInterval(timerInterval);
+            updateControlButtons();
+        }
+
+        function resumeRun() {
+            if (pauseStartTime) {
+                pausedDuration += Date.now() - pauseStartTime;
+                pauseStartTime = null;
+            }
+            runState = 'active';
+            updateControlButtons();
+
+            if (navigator.geolocation) {
+                watchId = navigator.geolocation.watchPosition(
+                    onGpsUpdate,
+                    (err) => console.error("GPS error:", err),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            }
+            timerInterval = setInterval(onSecondTick, 1000);
+        }
+
+        function promptFinishRun() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            if (timerInterval) clearInterval(timerInterval);
+
+            runState = 'summary';
+            showSummaryScreen();
+        }
+
+        function updateControlButtons() {
+            const container = document.getElementById('controlButtonArea');
+            if (runState === 'active') {
+                container.innerHTML = `
+                    <button onclick="pauseRun()" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-lg py-4 px-6 rounded-2xl shadow-xl shadow-amber-500/20 transition active:scale-[0.98] flex items-center justify-center space-x-2">
+                        <i data-lucide="pause" class="w-6 h-6 fill-slate-950"></i>
+                        <span>PAUZEER</span>
+                    </button>
+                `;
+            } else if (runState === 'paused') {
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="resumeRun()" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-base py-4 px-4 rounded-2xl shadow-xl transition active:scale-[0.98] flex items-center justify-center space-x-2">
+                            <i data-lucide="play" class="w-5 h-5 fill-slate-950"></i>
+                            <span>HERVAT</span>
+                        </button>
+                        <button onclick="promptFinishRun()" class="bg-rose-500 hover:bg-rose-400 text-white font-extrabold text-base py-4 px-4 rounded-2xl shadow-xl transition active:scale-[0.98] flex items-center justify-center space-x-2">
+                            <i data-lucide="square" class="w-5 h-5 fill-white"></i>
+                            <span>BEËINDIG</span>
+                        </button>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <button onclick="startRun()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-lg py-4 px-6 rounded-2xl shadow-xl shadow-emerald-500/20 transition active:scale-[0.98] flex items-center justify-center space-x-2">
+                        <i data-lucide="play" class="w-6 h-6 fill-slate-950"></i>
+                        <span>START RUN</span>
+                    </button>
+                `;
+                document.getElementById('targetCard').classList.remove('opacity-70', 'pointer-events-none');
+            }
+            lucide.createIcons();
+        }
+
+        // --- STREAMING_CHUNK:Implementing high-frequency GPS tracking and metrics calculation... ---
+        // --- 2Hz GPS TRACKING & METRICS ENGINE ---
+        function onGpsUpdate(position) {
+            if (runState !== 'active') return;
+
+            const now = Date.now();
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+
+            updateGpsStatus('connected', 'GPS Actief', accuracy);
+
+            // Filter out low accuracy GPS jumps (> 25 meters inaccuracy)
+            if (accuracy > 30 && routePoints.length > 0) return;
+
+            let distDelta = 0;
+            if (routePoints.length > 0) {
+                const lastPt = routePoints[routePoints.length - 1];
+                distDelta = calculateDistance(lastPt.lat, lastPt.lng, lat, lng);
+                // Ignore small GPS jitter under 1 meter
+                if (distDelta < 0.8) distDelta = 0;
+            }
+
+            totalDistance += distDelta;
+            routePoints.push({ lat, lng, timestamp: now, distance: totalDistance });
+
+            // Maintain recent locations for 5-sec average speed
+            recentLocations.push({ time: now, lat, lng, dist: totalDistance });
+            // Keep only last 5 seconds
+            recentLocations = recentLocations.filter(pt => now - pt.time <= 5000);
+
+            // Check target distance progression
+            checkTargetProgression();
+
+            // Check current km interval
+            if (totalDistance - currentKmStartDistance >= 1000) {
+                // Completed a full km, reset current km tracker for the remainder
+                currentKmStartDistance += 1000;
+                currentKmStartTime = now;
+            }
+
+            updateMetricsDisplay();
+        }
+
+        function onSecondTick() {
+            if (runState !== 'active') return;
+            activeSeconds++;
+
+            // Every 5 seconds, record speed sample for v,t graph
+            if (activeSeconds % 5 === 0) {
+                const speed5s = calculate5SecSpeed();
+                speedSamples5Sec.push({ time: activeSeconds, speed: speed5s });
+            }
+
+            updateMetricsDisplay();
+            updateEtaDisplay();
+        }
+
+        function calculate5SecSpeed() {
+            if (recentLocations.length < 2) return 0;
+            const oldest = recentLocations[0];
+            const newest = recentLocations[recentLocations.length - 1];
+            const timeDiffSec = (newest.time - oldest.time) / 1000;
+            const distDiffMeters = newest.dist - oldest.dist;
+            if (timeDiffSec <= 0) return 0;
+            return distDiffMeters / timeDiffSec; // m/s
+        }
+
+        function updateMetricsDisplay() {
+            // 1. Total Distance
+            document.getElementById('metricDistance').innerText = formatDistance(totalDistance);
+
+            // 2. Total Average Speed
+            const elapsedTotalSec = (Date.now() - startTime - pausedDuration) / 1000;
+            const totalSpeed = elapsedTotalSec > 0 ? totalDistance / elapsedTotalSec : 0;
+            document.getElementById('metricTotalPace').innerText = formatPace(totalSpeed);
+
+            // 3. Current KM Average Speed (from current km start to now)
+            const kmDistCovered = totalDistance - currentKmStartDistance;
+            const kmTimeSec = (Date.now() - currentKmStartTime) / 1000;
+            const kmSpeed = kmTimeSec > 0 ? kmDistCovered / kmTimeSec : 0;
+            document.getElementById('metricKmPace').innerText = formatPace(kmSpeed);
+
+            // 4. Last 5 Seconds Average Speed
+            const speed5s = calculate5SecSpeed();
+            document.getElementById('metric5SecPace').innerText = formatPace(speed5s);
+
+            // Update splits chart every 10 seconds or when needed
+            updateSplitsChartData();
+        }
+
+        function checkTargetProgression() {
+            if (currentTargetDistance > 0 && totalDistance >= currentTargetDistance && !hasPassedCurrentTarget) {
+                hasPassedCurrentTarget = true;
+                // Automatically progress to next default target if using auto mode
+                autoTargetIndex = (autoTargetIndex + 1) % autoTargets.length;
+                currentTargetDistance = autoTargets[autoTargetIndex];
+                document.getElementById('targetDistanceInput').value = (currentTargetDistance / 1000).toFixed(2).replace('.', ',');
+            }
+        }
+
+        function updateEtaDisplay() {
+            const inputVal = parseFloat(document.getElementById('targetDistanceInput').value);
+            const targetMeters = !isNaN(inputVal) && inputVal > 0 ? inputVal * 1000 : autoTargets[autoTargetIndex];
+
+            if (totalDistance < targetMeters && totalDistance > 50) {
+                document.getElementById('etaBox').classList.remove('hidden');
+
+                // ETA based on total average speed
+                const elapsedSec = (Date.now() - startTime - pausedDuration) / 1000;
+                const avgSpeedTotal = elapsedSec > 0 ? totalDistance / elapsedSec : 0;
+                const remainingDist = targetMeters - totalDistance;
+                
+                if (avgSpeedTotal > 0) {
+                    const etaTotalSecRem = remainingDist / avgSpeedTotal;
+                    document.getElementById('etaTotalVal').innerText = formatTimeDuration(etaTotalSecRem);
+                } else {
+                    document.getElementById('etaTotalVal').innerText = '--:--';
+                }
+
+                // ETA based on current km average speed
+                const kmDistCovered = totalDistance - currentKmStartDistance;
+                const kmTimeSec = (Date.now() - currentKmStartTime) / 1000;
+                const kmSpeed = kmTimeSec > 0 ? kmDistCovered / kmTimeSec : 0;
+
+                if (kmSpeed > 0) {
+                    const etaKmSecRem = remainingDist / kmSpeed;
+                    document.getElementById('etaKmVal').innerText = formatTimeDuration(etaKmSecRem);
+                } else {
+                    document.getElementById('etaKmVal').innerText = '--:--';
+                }
+            } else {
+                document.getElementById('etaBox').classList.add('hidden');
+            }
+        }
+
+        function formatTimeDuration(totalSeconds) {
+            const mins = Math.floor(totalSeconds / 60);
+            const secs = Math.round(totalSeconds % 60);
+            if (mins >= 60) {
+                const hrs = Math.floor(mins / 60);
+                const remMins = mins % 60;
+                return `${hrs}u ${remMins}m`;
+            }
+            return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        }
+
+        // --- SPLITS CHART (1-minute splits) ---
+        let splitsChart = null;
+        function initSplitsChart() {
+            const ctx = document.getElementById('splitsBarChart').getContext('2d');
+            splitsChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['1m', '2m', '3m', '4m', '5m'],
+                    datasets: [{
+                        label: 'Tempo (min/km)',
+                        data: [0, 0, 0, 0, 0],
+                        backgroundColor: '#10b981',
+                        borderRadius: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                        y: { 
+                            reverse: true, // Faster pace (lower min/km) is higher on y-axis
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { 
+                                color: '#94a3b8', 
+                                font: { size: 10 },
+                                callback: function(value) {
+                                    const m = Math.floor(value);
+                                    const s = Math.round((value - m) * 60);
+                                    return `${m}:${s < 10 ? '0':''}${s}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateSplitsChartData() {
+            if (!splitsChart || routePoints.length < 2) return;
+            // Group route points into 1-minute intervals
+            const minuteBuckets = {};
+            const runStartMs = routePoints[0].timestamp;
+
+            routePoints.forEach(pt => {
+                const minIdx = Math.floor((pt.timestamp - runStartMs) / 60000);
+                if (!minuteBuckets[minIdx]) {
+                    minuteBuckets[minIdx] = { dist: 0, startDist: pt.distance };
+                }
+                minuteBuckets[minIdx].endDist = pt.distance;
+            });
+
+            const labels = [];
+            const data = [];
+            const maxMin = Math.max(...Object.keys(minuteBuckets).map(Number), 0);
+
+            for (let i = 0; i <= maxMin; i++) {
+                labels.push(`${i+1}m`);
+                if (minuteBuckets[i]) {
+                    const dDist = minuteBuckets[i].endDist - minuteBuckets[i].startDist; // meters in this minute
+                    // If minute is partial or full 60s
+                    const speed = dDist > 0 ? dDist / 60 : 0; // m/s
+                    const secPerKm = speed > 0 ? 1000 / speed : 0;
+                    const minPerKm = secPerKm / 60;
+                    data.push(minPerKm > 0 && minPerKm < 15 ? minPerKm : 0);
+                } else {
+                    data.push(0);
+                }
+            }
+
+            splitsChart.data.labels = labels;
+            splitsChart.data.datasets[0].data = data;
+            splitsChart.update();
+        }
+
+        // --- STREAMING_CHUNK:Implementing summary screen and fastest 1km rolling split algorithm... ---
+        // --- SUMMARY & SAVING RUN ---
+        let currentFinishedRunData = null;
+
+        function showSummaryScreen() {
+            const elapsedSec = (Date.now() - startTime - pausedDuration) / 1000;
+            const avgSpeed = elapsedSec > 0 ? totalDistance / elapsedSec : 0;
+
+            currentFinishedRunData = {
+                id: Date.now(),
+                date: new Date().toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' }),
+                timestamp: Date.now(),
+                distance: totalDistance,
+                duration: elapsedSec,
+                avgSpeed: avgSpeed,
+                route: [...routePoints],
+                speedSamples: [...speedSamples5Sec]
+            };
+
+            document.getElementById('sumDistance').innerText = formatDistance(totalDistance) + ' km';
+            document.getElementById('sumPace').innerText = formatPace(avgSpeed) + ' min/km';
+            document.getElementById('runTitleInput').value = `Hardloopronde ${currentFinishedRunData.date}`;
+            document.getElementById('donnaCheckbox').checked = false;
+
+            document.getElementById('viewSummary').classList.remove('hidden');
+        }
+
+        function discardRun() {
+            if (confirm("Weet je zeker dat je deze run wilt verwijderen?")) {
+                document.getElementById('viewSummary').classList.add('hidden');
+                runState = 'idle';
+                updateControlButtons();
+            }
+        }
+
+        // Calculate fastest 1km rolling split (from any point to any point covering >= 1000m)
+        function calculateFastest1Km(route) {
+            if (!route || route.length < 2) return 0;
+            let fastestPaceSec = 999999;
+
+            for (let i = 0; i < route.length; i++) {
+                for (let j = i + 1; j < route.length; j++) {
+                    const dDist = route[j].distance - route[i].distance;
+                    if (dDist >= 1000) {
+                        const dTimeSec = (route[j].timestamp - route[i].timestamp) / 1000;
+                        if (dTimeSec > 0) {
+                            const speed = dDist / dTimeSec;
+                            const paceSec = 1000 / speed;
+                            if (paceSec < fastestPaceSec) {
+                                fastestPaceSec = paceSec;
+                            }
+                            break; // found 1km window for this starting point
+                        }
+                    }
+                }
+            }
+
+            return fastestPaceSec === 999999 ? 0 : (1000 / fastestPaceSec); // returns m/s of fastest 1km
+        }
+
+        function saveRun() {
+            const title = document.getElementById('runTitleInput').value.trim() || 'Mijn Hardloopronde';
+            const metDonna = document.getElementById('donnaCheckbox').checked;
+
+            const fastestSpeed = calculateFastest1Km(currentFinishedRunData.route);
+
+            // Calculate 1km split breakdown for chart
+            const kmSplits = calculateKmSplits(currentFinishedRunData.route);
+
+            const savedRun = {
+                ...currentFinishedRunData,
+                title,
+                metDonna,
+                fastestKmSpeed: fastestSpeed,
+                kmSplits
+            };
+
+            // Save to LocalStorage
+            let savedRuns = JSON.parse(localStorage.getItem('runtrack_saved_runs') || '[]');
+            savedRuns.unshift(savedRun);
+            localStorage.setItem('runtrack_saved_runs', JSON.stringify(savedRuns));
+
+            // Reset and close summary
+            document.getElementById('viewSummary').classList.add('hidden');
+            runState = 'idle';
+            updateControlButtons();
+            loadHistoryList();
+            toggleHistoryDrawer();
+        }
+
+        function calculateKmSplits(route) {
+            if (!route || route.length === 0) return [];
+            let splits = [];
+            let currentKmIndex = 1;
+            let splitStartTime = route[0].timestamp;
+            let splitStartDist = 0;
+
+            for (let i = 1; i < route.length; i++) {
+                if (route[i].distance >= currentKmIndex * 1000) {
+                    const distCovered = route[i].distance - splitStartDist;
+                    const timeCoveredSec = (route[i].timestamp - splitStartTime) / 1000;
+                    const speed = timeCoveredSec > 0 ? distCovered / timeCoveredSec : 0;
+                    splits.push({ km: currentKmIndex, speed });
+                    currentKmIndex++;
+                    splitStartTime = route[i].timestamp;
+                    splitStartDist = route[i].distance;
+                }
+            }
+            // Add remaining partial km if any
+            if (route[route.length - 1].distance > (currentKmIndex - 1) * 1000) {
+                const distCovered = route[route.length - 1].distance - splitStartDist;
+                const timeCoveredSec = (route[route.length - 1].timestamp - splitStartTime) / 1000;
+                const speed = timeCoveredSec > 0 ? distCovered / timeCoveredSec : 0;
+                if (distCovered > 50) splits.push({ km: currentKmIndex, speed });
+            }
+
+            return splits;
+        }
+
+        // --- STREAMING_CHUNK:Implementing history drawer and detailed run views with maps and charts... ---
+        // --- HISTORY & SWIPE NAVIGATION ---
+        function toggleHistoryDrawer() {
+            const drawer = document.getElementById('historyDrawer');
+            if (drawer.classList.contains('translate-x-full')) {
+                drawer.classList.remove('translate-x-full');
+                loadHistoryList();
+            } else {
+                drawer.classList.add('translate-x-full');
+            }
+        }
+
+        // Swipe left gesture detection to open history
+        function handleTouchStart(e) {
+            touchStartX = e.changedTouches[0].screenX;
+        }
+
+        function handleTouchEnd(e) {
+            const touchEndX = e.changedTouches[0].screenX;
+            if (touchStartX - touchEndX > 100 && (runState === 'idle' || runState === 'paused')) {
+                // Swipe left detected -> open history drawer
+                const drawer = document.getElementById('historyDrawer');
+                drawer.classList.remove('translate-x-full');
+                loadHistoryList();
+            }
+        }
+
+        function loadHistoryList() {
+            const container = document.getElementById('historyListContainer');
+            const savedRuns = JSON.parse(localStorage.getItem('runtrack_saved_runs') || '[]');
+
+            if (savedRuns.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-slate-500">
+                        <i data-lucide="footprints" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
+                        <p class="text-xs">Nog geen opgeslagen runs gevonden.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            container.innerHTML = '';
+            savedRuns.forEach(run => {
+                const distStr = formatDistance(run.distance) + ' km';
+                const avgPaceStr = formatPace(run.avgSpeed) + ' min/km';
+                const fastestPaceStr = run.fastestKmSpeed ? formatPace(run.fastestKmSpeed) + ' min/km' : 'N.v.t.';
+
+                const card = document.createElement('div');
+                card.className = 'bg-slate-800 border border-slate-700/80 rounded-2xl p-4 hover:border-emerald-500/50 transition cursor-pointer space-y-2 shadow-md';
+                card.onclick = () => openRunDetail(run.id);
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-white text-sm truncate max-w-[200px]">${run.title}</h4>
+                        <span class="text-[10px] bg-slate-700/80 px-2 py-0.5 rounded-full text-slate-300">${run.date}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 pt-1 text-center">
+                        <div class="bg-slate-900/60 p-2 rounded-xl">
+                            <span class="text-[9px] text-slate-400 block">Afstand</span>
+                            <span class="text-xs font-extrabold text-white">${distStr}</span>
+                        </div>
+                        <div class="bg-slate-900/60 p-2 rounded-xl">
+                            <span class="text-[9px] text-slate-400 block">Gem. Tempo</span>
+                            <span class="text-xs font-extrabold text-emerald-400">${avgPaceStr}</span>
+                        </div>
+                        <div class="bg-slate-900/60 p-2 rounded-xl">
+                            <span class="text-[9px] text-slate-400 block">Snelste 1km</span>
+                            <span class="text-xs font-extrabold text-cyan-400">${fastestPaceStr}</span>
+                        </div>
+                    </div>
+                    ${run.metDonna ? `<div class="flex items-center space-x-1 text-rose-400 text-[10px] font-semibold pt-1"><i data-lucide="heart" class="w-3 h-3 fill-rose-400"></i><span>Met Donna</span></div>` : ''}
+                `;
+                container.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        // --- RUN DETAIL SCREEN & CHARTS ---
+        function openRunDetail(runId) {
+            const savedRuns = JSON.parse(localStorage.getItem('runtrack_saved_runs') || '[]');
+            const run = savedRuns.find(r => r.id === runId);
+            if (!run) return;
+
+            selectedDetailRunId = runId;
+            toggleHistoryDrawer(); // close drawer
+
+            document.getElementById('detailTitleHeader').innerText = run.title;
+            document.getElementById('detailDist').innerText = formatDistance(run.distance) + ' km';
+            document.getElementById('detailPace').innerText = formatPace(run.avgSpeed);
+            document.getElementById('detailFastestKm').innerText = run.fastestKmSpeed ? formatPace(run.fastestKmSpeed) : '--:--';
+
+            const donnaBadge = document.getElementById('detailDonnaBadge');
+            if (run.metDonna) {
+                donnaBadge.classList.remove('hidden');
+            } else {
+                donnaBadge.classList.add('hidden');
+            }
+
+            document.getElementById('viewDetail').classList.remove('hidden');
+
+            // Render Leaflet Map
+            setTimeout(() => {
+                renderDetailMap(run.route);
+                renderDetailSplitsChart(run.kmSplits);
+                renderDetailVtChart(run.speedSamples);
+            }, 300);
+        }
+
+        function closeDetail() {
+            document.getElementById('viewDetail').classList.add('hidden');
+            if (detailMapInstance) {
+                detailMapInstance.remove();
+                detailMapInstance = null;
+            }
+        }
+
+        function deleteCurrentDetailRun() {
+            if (confirm("Weet je zeker dat je deze opgeslagen run wilt verwijderen?")) {
+                let savedRuns = JSON.parse(localStorage.getItem('runtrack_saved_runs') || '[]');
+                savedRuns = savedRuns.filter(r => r.id !== selectedDetailRunId);
+                localStorage.setItem('runtrack_saved_runs', JSON.stringify(savedRuns));
+                closeDetail();
+                loadHistoryList();
+            }
+        }
+
+        function renderDetailMap(route) {
+            const mapContainer = document.getElementById('detailMap');
+            mapContainer.innerHTML = '';
+
+            if (!route || route.length === 0) {
+                mapContainer.innerHTML = '<div class="flex items-center justify-center h-full text-xs text-slate-500">Geen GPS route beschikbaar</div>';
+                return;
+            }
+
+            if (detailMapInstance) {
+                detailMapInstance.remove();
+                detailMapInstance = null;
+            }
+
+            const latlngs = route.map(pt => [pt.lat, pt.lng]);
+            detailMapInstance = L.map('detailMap', { zoomControl: false, attributionControl: false }).setView(latlngs[0], 15);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19
+            }).addTo(detailMapInstance);
+
+            detailMapPolyline = L.polyline(latlngs, { color: '#10b981', weight: 4, opacity: 0.8 }).addTo(detailMapInstance);
+            detailMapInstance.fitBounds(detailMapPolyline.getBounds(), { padding: [20, 20] });
+        }
+
+        function renderDetailSplitsChart(kmSplits) {
+            const ctx = document.getElementById('detailSplitsChart').getContext('2d');
+            if (detailSplitsChartInstance) detailSplitsChartInstance.destroy();
+
+            const labels = kmSplits.map(s => `km ${s.km}`);
+            const data = kmSplits.map(s => {
+                if (s.speed <= 0) return 0;
+                const secPerKm = 1000 / s.speed;
+                return secPerKm / 60;
+            });
+
+            detailSplitsChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels.length > 0 ? labels : ['1km'],
+                    datasets: [{
+                        label: 'Tempo (min/km)',
+                        data: data.length > 0 ? data : [0],
+                        backgroundColor: '#38bdf8',
+                        borderRadius: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                        y: { 
+                            reverse: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { 
+                                color: '#94a3b8', 
+                                font: { size: 10 },
+                                callback: function(value) {
+                                    const m = Math.floor(value);
+                                    const s = Math.round((value - m) * 60);
+                                    return `${m}:${s < 10 ? '0':''}${s}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderDetailVtChart(speedSamples) {
+            const ctx = document.getElementById('detailVtChart').getContext('2d');
+            if (detailVtChartInstance) detailVtChartInstance.destroy();
+
+            const labels = speedSamples.map(s => `${s.time}s`);
+            const data = speedSamples.map(s => {
+                // Convert m/s to min/km for y-axis
+                if (s.speed <= 0.2) return 0;
+                const secPerKm = 1000 / s.speed;
+                const minPerKm = secPerKm / 60;
+                return minPerKm < 15 ? minPerKm : 0;
+            });
+
+            detailVtChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels.length > 0 ? labels : ['0s'],
+                    datasets: [{
+                        label: 'Snelheid (min/km)',
+                        data: data.length > 0 ? data : [0],
+                        borderColor: '#f43f5e',
+                        backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+                        y: { 
+                            reverse: true,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { 
+                                color: '#94a3b8', 
+                                font: { size: 10 },
+                                callback: function(value) {
+                                    const m = Math.floor(value);
+                                    const s = Math.round((value - m) * 60);
+                                    return `${m}:${s < 10 ? '0':''}${s}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- INFO MODAL ---
+        function openInfoModal() {
+            document.getElementById('infoModal').classList.remove('hidden');
+        }
+        function closeInfoModal() {
+            document.getElementById('infoModal').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
